@@ -176,11 +176,12 @@ async function fetchFromRapidAPI() {
 
   try {
     // Parameters — best-guess based on common TikTok scraper conventions.
-    // Adjust once we see the playground's parameter list.
+    // `limit` may or may not be respected by the API; if it caps lower we
+    // still take whatever we get.
     const params = new URLSearchParams({
       country: 'GB',
       period:  '7',
-      limit:   '50',
+      limit:   '200',
     });
 
     const url = `https://${RAPIDAPI_HOST}${ENDPOINT_PATH}?${params}`;
@@ -222,7 +223,8 @@ async function fetchFromRapidAPI() {
     // Non-originals (commercial catalog tracks) we always keep.
     // Also: drop anything whose title isn't predominantly Latin script
     // (Cyrillic/Arabic/CJK content won't be used by the HX creator team).
-    const ORIGINAL_REPOST_THRESHOLD = 1000;
+    const ORIGINAL_REPOST_THRESHOLD = 500;
+    const MAX_RESULTS               = 100;
 
     let droppedNonLatin = 0;
     let droppedLowOriginal = 0;
@@ -240,7 +242,7 @@ async function fetchFromRapidAPI() {
         return true;
       })
       .sort((a, b) => toNum(b.music.reposts) - toNum(a.music.reposts))
-      .slice(0, 50);
+      .slice(0, MAX_RESULTS);
 
     const originalCount   = filtered.filter(it => it.music.musicOriginal).length;
     const commercialCount = filtered.length - originalCount;
