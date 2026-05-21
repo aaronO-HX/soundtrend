@@ -6,7 +6,7 @@
 const { ApifyClient } = require('apify-client');
 
 const ACTOR_ID   = 'data_xplorer/tiktok-trends';
-const CACHE_TTL  = 4 * 60 * 60 * 1000; // 4 hours
+const CACHE_TTL  = 24 * 60 * 60 * 1000; // 24 hours — trending sounds change slowly
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -136,22 +136,26 @@ async function fetchFromApify() {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
-// Returns cached sounds if fresh, otherwise kicks off a background refresh
-// and returns whatever we have (stale cache or null).
+// Returns cached sounds. On cold start (no cache yet) AWAIT the fetch so the
+// first request actually gets data. On subsequent stale checks, refresh in the
+// background and return what we have.
 async function getSounds() {
   const stale = !_cache || !_fetchedAt || (Date.now() - _fetchedAt) > CACHE_TTL;
 
-  if (stale) {
-    // Fire-and-forget — don't block the API response
-    fetchFromApify();
+  if (!_cache) {
+    // Cold start — block until we have data (or fetch fails and returns null)
+    return await fetchFromApify();
   }
 
-  return _cache; // null on first cold start before fetch completes
+  if (stale) {
+    // Have stale data — refresh in background, serve stale immediately
+    fetchFromApify().catch(err => console.error('[Apify] Background refresh failed:', err));
+  }
+
+  return _cache;
 }
 
-// Warm the cache immediately on module load (defensive — never let this kill the process)
-fetchFromApify().catch(err => {
-  console.error('[Apify] Startup fetch crashed:', err);
-});
+// NOTE: No auto-fetch on startup — this hammers Apify on every Railway redeploy
+// and triggers rate limits. The first /api/sounds request will warm the cache instead.
 
 module.exports = { getSounds };
