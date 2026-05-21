@@ -113,7 +113,28 @@ async function fetchFromApify() {
       throw new Error(`HTTP ${res.status}: ${body}`);
     }
 
-    const items  = await res.json();
+    const raw = await res.json();
+
+    // Response shape can vary — be defensive
+    let items;
+    if (Array.isArray(raw)) {
+      items = raw;
+    } else if (Array.isArray(raw?.items)) {
+      items = raw.items;
+    } else if (Array.isArray(raw?.data?.items)) {
+      items = raw.data.items;
+    } else {
+      console.warn('[Apify] Unexpected response shape:', JSON.stringify(raw).slice(0, 500));
+      items = [];
+    }
+
+    if (items.length === 0) {
+      console.warn('[Apify] Got 0 items. Full response (first 500 chars):',
+                   JSON.stringify(raw).slice(0, 500));
+    } else {
+      console.log('[Apify] First item keys:', Object.keys(items[0]).join(', '));
+    }
+
     const sounds = items.map(mapItem);
     console.log(`[Apify] Fetched ${sounds.length} trending sounds`);
 
