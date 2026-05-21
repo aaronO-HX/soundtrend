@@ -197,19 +197,25 @@ async function fetchFromApify() {
 async function getSounds() {
   const stale = !_cache || !_fetchedAt || (Date.now() - _fetchedAt) > CACHE_TTL;
 
-  if (!_cache) {
-    // Cold start — block until we have data
-    return await fetchFromApify();
-  }
-
   if (stale) {
-    // Have stale data — refresh in background, serve stale immediately
+    // Fire-and-forget — never block the API response (Railway has a request
+    // timeout much shorter than Apify's actor runtime)
     fetchFromApify().catch(err => console.error('[Apify] Background refresh failed:', err));
   }
 
-  return _cache;
+  return _cache; // null on cold start — caller falls back to mock data
+}
+
+// Status getter for /health endpoint (does NOT trigger a fetch)
+function getCacheStatus() {
+  return {
+    cached:    Boolean(_cache),
+    count:     _cache?.length || 0,
+    fetchedAt: _fetchedAt ? new Date(_fetchedAt).toISOString() : null,
+    fetching:  _fetching,
+  };
 }
 
 // NOTE: No startup auto-fetch — first /api/sounds request warms the cache.
 
-module.exports = { getSounds };
+module.exports = { getSounds, getCacheStatus };

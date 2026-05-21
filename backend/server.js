@@ -44,13 +44,14 @@ function requireAuth(req, res, next) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get('/health', async (req, res) => {
-  const live = await apify.getSounds();
+app.get('/health', (req, res) => {
+  const status = apify.getCacheStatus();
   res.json({
     status:     'ok',
-    dataSource: live ? 'apify' : 'mock',
-    sounds:     live ? live.length : MOCK.length,
+    dataSource: status.cached ? 'apify' : 'mock',
+    sounds:     status.cached ? status.count : MOCK.length,
     apifyToken: Boolean(process.env.APIFY_TOKEN),
+    cache:      status,
   });
 });
 
