@@ -41,6 +41,18 @@ function toNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Returns true if the string is mostly written in Latin script (English,
+// Spanish, Portuguese, French, etc.) and not Cyrillic, Arabic, CJK, Thai, etc.
+// We're permissive: emoji, digits, punctuation don't count against the string.
+// Threshold: 70%+ of LETTERS must be Latin script.
+function isLatinScript(s) {
+  if (!s || typeof s !== 'string') return false;
+  const letters = [...s].filter(c => /\p{L}/u.test(c));
+  if (letters.length === 0) return false; // No letters at all (e.g. all emoji) → reject
+  const latin = letters.filter(c => /\p{Script=Latin}/u.test(c));
+  return latin.length / letters.length >= 0.7;
+}
+
 // ── Mapping ────────────────────────────────────────────────────────────────────
 //
 // Real response shape (confirmed via /debug/fetch on 2026-05-21):
@@ -208,23 +220,32 @@ async function fetchFromRapidAPI() {
     // Original sounds with low engagement are noise (one creator's audio).
     // Original sounds with high engagement ARE viral trends — keep those.
     // Non-originals (commercial catalog tracks) we always keep.
+    // Also: drop anything whose title isn't predominantly Latin script
+    // (Cyrillic/Arabic/CJK content won't be used by the HX creator team).
     const ORIGINAL_REPOST_THRESHOLD = 1000;
+
+    let droppedNonLatin = 0;
+    let droppedLowOriginal = 0;
+    let droppedNoTitle = 0;
 
     const filtered = items
       .filter(it => {
         const m = it?.music;
-        if (!m || !m.title || m.title.trim().length === 0) return false;
-        if (m.musicOriginal) {
-          return toNum(m.reposts) >= ORIGINAL_REPOST_THRESHOLD;
+        if (!m || !m.title || m.title.trim().length === 0) { droppedNoTitle++; return false; }
+        if (m.musicOriginal && toNum(m.reposts) < ORIGINAL_REPOST_THRESHOLD) {
+          droppedLowOriginal++;
+          return false;
         }
-        return true; // commercial catalog track — always include
+        if (!isLatinScript(m.title)) { droppedNonLatin++; return false; }
+        return true;
       })
       .sort((a, b) => toNum(b.music.reposts) - toNum(a.music.reposts))
       .slice(0, 50);
 
     const originalCount   = filtered.filter(it => it.music.musicOriginal).length;
     const commercialCount = filtered.length - originalCount;
-    console.log(`[RapidAPI] After filtering: ${commercialCount} commercial + ${originalCount} viral originals = ${filtered.length} total`);
+    console.log(`[RapidAPI] Filtered: ${commercialCount} commercial + ${originalCount} viral originals = ${filtered.length} kept`);
+    console.log(`[RapidAPI] Dropped: ${droppedNonLatin} non-Latin, ${droppedLowOriginal} low-engagement originals, ${droppedNoTitle} no-title`);
 
     const sounds = filtered.map(mapItemToSound);
 
