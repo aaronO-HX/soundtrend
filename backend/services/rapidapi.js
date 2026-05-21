@@ -42,33 +42,55 @@ function toNum(v) {
 }
 
 // ── Mapping ────────────────────────────────────────────────────────────────────
+//
+// Real response shape (confirmed via /debug/fetch on 2026-05-21):
+//   { data: { stats: [ { music: { id, musicId, title, creator, url, cover,
+//     duration, reposts, musicOriginal, dailyRise, dailyRise24hours,
+//     dailyRiseMonth, musicUrl, appleLink, spotifyLink, youtubeLink, ... } } ] } }
+//
+// Items array path: data.stats
+// Per-item music object path: item.music
+// "musicOriginal: true" = one-off user audio (not commercial music) → filtered out.
 
 function mapItemToSound(item, index) {
-  // Try every reasonable property name for each field
-  const musicId  = pick(item, 'music_id', 'musicId', 'id', 'sound_id', 'soundId');
-  const title    = pick(item, 'title', 'music_title', 'name', 'music_name', 'track_title') || 'Unknown';
-  const artist   = pick(item, 'author', 'author_name', 'artist', 'musician', 'creator', 'music_author') || 'Unknown';
-  const cover    = pick(item, 'cover', 'cover_url', 'coverUrl', 'image', 'thumbnail', 'avatar', 'album_cover');
-  const audio    = pick(item, 'play_url', 'playUrl', 'audio_url', 'audioUrl', 'url', 'music_url');
-  const duration = toNum(pick(item, 'duration', 'duration_sec', 'length'));
+  const m = item?.music || {};
 
-  const useCount    = toNum(pick(item, 'video_count', 'videoCount', 'use_count', 'useCount', 'posts', 'count', 'usages'));
-  const playCount   = toNum(pick(item, 'play_count', 'playCount', 'plays', 'views', 'total_plays'));
-  const growth24h   = toNum(pick(item, 'growth_24h', 'growth24h', 'growth_count_24h', 'change_24h'));
-  const growthPct48 = toNum(pick(item, 'growth_percent_48h', 'growthPercent48h', 'growth_48h_percent', 'trend_score', 'growth_rate'));
+  const musicId  = m.musicId || m.id;
+  const title    = m.title || 'Unknown';
+  const artist   = m.creator || m.authorNickname || 'Unknown';
+  const cover    = m.cover || null;
+  const audio    = m.url || null;
+  const duration = toNum(m.duration);
+  const reposts  = toNum(m.reposts);
 
-  // Sparkline — if API returns a history array, use it; else flat placeholder
-  const history = pick(item, 'history', 'trend', 'daily_counts', 'sparkline');
-  let sparkline = [1, 1, 1, 1, 1, 1, 1];
-  if (Array.isArray(history) && history.length > 0) {
-    const nums = history.map(toNum).filter(n => Number.isFinite(n));
-    if (nums.length >= 2) {
-      // Pad/truncate to 7 entries
-      if (nums.length >= 7) sparkline = nums.slice(-7);
-      else sparkline = [...Array(7 - nums.length).fill(nums[0]), ...nums];
-      sparkline = sparkline.map(v => Math.max(v, 1));
+  // Growth signals from API
+  const dailyRise    = toNum(m.dailyRise);          // current daily rise (count)
+  const dailyRise24h = toNum(m.dailyRise24hours);   // last-24h delta (count)
+  const dailyRiseMo  = toNum(m.dailyRiseMonth);     // 30-day delta (count)
+
+  // Growth % = 24h delta as a percentage of total reposts.
+  // Clamp to display range.
+  const growthPct = reposts > 0 && dailyRise24h
+    ? Math.round((dailyRise24h / reposts) * 100)
+    : 0;
+
+  // Sparkline — we don't get a per-day series from this API, but we can
+  // synthesize a plausible 7-day curve from `reposts` + `dailyRise24h`.
+  // Approach: end at `reposts`, step back by `dailyRise24h` per day so the
+  // line rises if the sound is gaining, flat if not.
+  let sparkline;
+  if (reposts > 0) {
+    const step = dailyRise24h || Math.max(1, Math.round(reposts * 0.02));
+    sparkline = [];
+    for (let i = 6; i >= 0; i--) {
+      sparkline.unshift(Math.max(reposts - step * i, 1));
     }
+  } else {
+    sparkline = [1, 1, 1, 1, 1, 1, 1];
   }
+
+  // "Newly emerging" heuristic: low total uses but actively rising.
+  const isNew = reposts > 0 && reposts < 200 && dailyRise24h > reposts * 0.1;
 
   return {
     id:               `rapid-tt-${musicId || index}`,
@@ -76,23 +98,31 @@ function mapItemToSound(item, index) {
     artist:           artist,
     platform:         'tiktok',
     rank:             index + 1,
-    useCount:         playCount || useCount || 0,
-    growthCount24h:   growth24h || null,
-    growthPercent48h: Math.max(-90, Math.min(growthPct48 || 0, 500)),
+    useCount:         reposts,
+    growthCount24h:   dailyRise24h || null,
+    growthPercent48h: Math.max(-90, Math.min(growthPct, 500)),
     commercialStatus: 'check',
     commercialNote:   'Commercial use status unknown — verify rights with your label rep before using in branded content.',
-    isNew:            useCount > 0 && useCount < 4 && playCount > 100_000,
+    isNew,
     isPromoted:       false,
-    addedAt:          new Date().toISOString(),
+    addedAt:          m.parseDate || new Date().toISOString(),
     duration:         duration || null,
-    audioUrl:         audio || null,
-    coverUrl:         cover || null,
-    tiktokUrl:        null,
+    audioUrl:         audio,
+    coverUrl:         cover,
+    tiktokUrl:        m.musicUrl || null,
     country:          'GB',
     categories:       [],
     sparkline,
-    _source:          'rapidapi',
-    _raw:             item, // keep for debugging — strip in prod if response large
+    streamingLinks: {
+      apple:    m.appleLink   || null,
+      spotify:  m.spotifyLink || null,
+      youtube:  m.youtubeLink || null,
+      deezer:   m.deezerLink  || null,
+    },
+    _source:    'rapidapi',
+    _musicId:   musicId,
+    _genre:     m.genre,
+    _status:    m.musicStatus,
   };
 }
 
@@ -151,27 +181,31 @@ async function fetchFromRapidAPI() {
 
     const data = await res.json();
 
-    // Log a compact preview of the response so we can adjust field mappings
-    // without burning another quota call.
-    console.log('[RapidAPI] Response top-level keys:', Object.keys(data || {}));
-    console.log('[RapidAPI] Raw response preview:', JSON.stringify(data).slice(0, 1500));
-
-    // Find the array of items — could be under `data`, `items`, `results`, etc.
-    let items = null;
-    if (Array.isArray(data)) items = data;
-    else items = pick(data, 'data', 'items', 'results', 'list', 'musics', 'sounds', 'music_list');
+    // Items array path (confirmed): data.stats
+    const items = data?.data?.stats;
 
     if (!Array.isArray(items) || items.length === 0) {
-      console.warn('[RapidAPI] No items array found in response. Full body:', JSON.stringify(data).slice(0, 2000));
-      _lastError = 'No items in response — check field path';
+      console.warn('[RapidAPI] data.stats missing/empty. Top-level keys:', Object.keys(data || {}));
+      console.warn('[RapidAPI] Body preview:', JSON.stringify(data).slice(0, 1500));
+      _lastError = 'data.stats not found in response';
       return null;
     }
 
-    console.log(`[RapidAPI] Got ${items.length} items`);
-    console.log('[RapidAPI] First item keys:', Object.keys(items[0] || {}));
-    console.log('[RapidAPI] First item sample:', JSON.stringify(items[0]).slice(0, 1000));
+    console.log(`[RapidAPI] Got ${items.length} raw items`);
 
-    const sounds = items.slice(0, 50).map(mapItemToSound);
+    // Filter out original sounds (one-off user audio, not commercial music)
+    // and items missing core fields. Sort by reposts desc and take top 50.
+    const filtered = items
+      .filter(it => {
+        const m = it?.music;
+        return m && !m.musicOriginal && m.title && m.title.trim().length > 0;
+      })
+      .sort((a, b) => toNum(b.music.reposts) - toNum(a.music.reposts))
+      .slice(0, 50);
+
+    console.log(`[RapidAPI] ${filtered.length} commercial sounds after filtering`);
+
+    const sounds = filtered.map(mapItemToSound);
 
     _cache     = sounds;
     _fetchedAt = Date.now();
