@@ -1,7 +1,8 @@
 const express = require('express');
 const cors    = require('cors');
 const jwt     = require('jsonwebtoken');
-const SOUNDS  = require('./data/sounds');
+const MOCK    = require('./data/sounds');
+const apify   = require('./services/apify');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -35,14 +36,37 @@ function requireAuth(req, res, next) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', sounds: SOUNDS.length });
+app.get('/health', async (req, res) => {
+  const live = await apify.getSounds();
+  res.json({
+    status:     'ok',
+    dataSource: live ? 'apify' : 'mock',
+    sounds:     live ? live.length : MOCK.length,
+    apifyToken: Boolean(process.env.APIFY_TOKEN),
+  });
 });
 
-app.get('/api/sounds', requireAuth, (req, res) => {
-  res.json(SOUNDS);
+app.get('/api/sounds', requireAuth, async (req, res) => {
+  try {
+    const live = await apify.getSounds();
+
+    if (live && live.length > 0) {
+      // Merge: live TikTok sounds + mock Instagram sounds
+      const instagramMock = MOCK.filter(s => s.platform === 'instagram');
+      return res.json([...live, ...instagramMock]);
+    }
+
+    // Fall back to full mock data set
+    console.warn('[API] Serving mock data — no live Apify data available');
+    res.json(MOCK);
+
+  } catch (err) {
+    console.error('[API] /api/sounds error:', err.message);
+    res.json(MOCK);
+  }
 });
 
 app.listen(PORT, () => {
   console.log(`SoundTrend API running on port ${PORT}`);
+  console.log(`Data source: ${process.env.APIFY_TOKEN ? 'Apify (live)' : 'Mock (no APIFY_TOKEN)'}`);
 });
