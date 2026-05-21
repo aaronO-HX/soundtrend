@@ -2,7 +2,7 @@ const express = require('express');
 const cors    = require('cors');
 const jwt     = require('jsonwebtoken');
 const MOCK    = require('./data/sounds');
-const apify   = require('./services/apify');
+const rapid   = require('./services/rapidapi');
 
 // Catch-all: log but don't crash the server
 process.on('uncaughtException', err => {
@@ -60,19 +60,19 @@ function requireAuth(req, res, next) {
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
-  const status = apify.getCacheStatus();
+  const status = rapid.getCacheStatus();
   res.json({
-    status:     'ok',
-    dataSource: status.cached ? 'apify' : 'mock',
-    sounds:     status.cached ? status.count : MOCK.length,
-    apifyToken: Boolean(process.env.APIFY_TOKEN),
-    cache:      status,
+    status:       'ok',
+    dataSource:   status.cached ? 'rapidapi' : 'mock',
+    sounds:       status.cached ? status.count : MOCK.length,
+    rapidApiKey:  Boolean(process.env.RAPIDAPI_KEY),
+    cache:        status,
   });
 });
 
 app.get('/api/sounds', requireAuth, async (req, res) => {
   try {
-    const live = await apify.getSounds();
+    const live = await rapid.getSounds();
 
     if (live && live.length > 0) {
       // Merge: live TikTok sounds + mock Instagram sounds
@@ -81,7 +81,7 @@ app.get('/api/sounds', requireAuth, async (req, res) => {
     }
 
     // Fall back to full mock data set
-    console.warn('[API] Serving mock data — no live Apify data available');
+    console.warn('[API] Serving mock data — no live RapidAPI data available');
     res.json(MOCK);
 
   } catch (err) {
@@ -92,5 +92,5 @@ app.get('/api/sounds', requireAuth, async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`SoundTrend API listening on 0.0.0.0:${PORT}`);
-  console.log(`Data source: ${process.env.APIFY_TOKEN ? 'Apify (live)' : 'Mock (no APIFY_TOKEN)'}`);
+  console.log(`Data source: ${process.env.RAPIDAPI_KEY ? 'RapidAPI (live)' : 'Mock (no RAPIDAPI_KEY)'}`);
 });
