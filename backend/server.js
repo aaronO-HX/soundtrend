@@ -19,6 +19,21 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
 }));
 
+// Log every incoming request — so we can prove if requests are reaching the server
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.url} from ${req.ip}`);
+  next();
+});
+
+// Dead-simple route — no JWT, no Apify, just confirm we're alive
+app.get('/ping', (req, res) => {
+  res.type('text').send('pong');
+});
+
+app.get('/', (req, res) => {
+  res.type('text').send('SoundTrend API — try /health or /ping');
+});
+
 // ── JWT auth middleware ────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
   const header = req.headers['authorization'] || '';
