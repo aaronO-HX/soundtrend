@@ -95,10 +95,12 @@ async function fetchFromApify() {
     const client = new ApifyClient({ token });
 
     const input = {
-      trendType:       'songs',
-      songCountryCode: 'US',
-      songPeriod:      '7',
-      maxItems:        50,
+      trendType:          'songs',
+      songCountryCode:    'GB',    // UK
+      songPeriod:         '7',     // last 7 days
+      songCommercialOnly: true,    // commercial music library only
+      maxItems:           50,
+      // Note: industryId (e.g. "travel") is hashtags-only — not supported for songs
     };
     console.log('[Apify] Input:', JSON.stringify(input));
 
