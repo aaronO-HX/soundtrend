@@ -3,7 +3,9 @@
 // Refreshes every 4 hours, warms cache on startup, falls back to null so
 // server.js can serve mock data instead.
 
-const ACTOR_ID   = 'data_xplorer~tiktok-trends';
+const { ApifyClient } = require('apify-client');
+
+const ACTOR_ID   = 'data_xplorer/tiktok-trends';
 const CACHE_TTL  = 4 * 60 * 60 * 1000; // 4 hours
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -90,47 +92,26 @@ async function fetchFromApify() {
   console.log('[Apify] Fetching trending TikTok sounds...');
 
   try {
-    const res = await fetch(
-      `https://api.apify.com/v2/acts/${ACTOR_ID}/run-sync-get-dataset-items`,
-      {
-        method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          trendType:       'songs',
-          maxItems:        50,
-          songCountryCode: 'US',
-          songPeriod:      '7',
-        }),
-        signal: AbortSignal.timeout(5 * 60 * 1000), // actor can take up to 5 min
-      }
-    );
+    const client = new ApifyClient({ token });
 
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`HTTP ${res.status}: ${body}`);
-    }
+    const input = {
+      trendType:       'songs',
+      songCountryCode: 'US',
+      songPeriod:      '7',
+      maxItems:        50,
+    };
+    console.log('[Apify] Input:', JSON.stringify(input));
 
-    const raw = await res.json();
+    const run = await client.actor(ACTOR_ID).call(input, {
+      waitSecs: 300, // up to 5 min
+    });
 
-    // Response shape can vary — be defensive
-    let items;
-    if (Array.isArray(raw)) {
-      items = raw;
-    } else if (Array.isArray(raw?.items)) {
-      items = raw.items;
-    } else if (Array.isArray(raw?.data?.items)) {
-      items = raw.data.items;
-    } else {
-      console.warn('[Apify] Unexpected response shape:', JSON.stringify(raw).slice(0, 500));
-      items = [];
-    }
+    console.log(`[Apify] Run finished: status=${run.status} datasetId=${run.defaultDatasetId}`);
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
     if (items.length === 0) {
-      console.warn('[Apify] Got 0 items. Full response (first 500 chars):',
-                   JSON.stringify(raw).slice(0, 500));
+      console.warn('[Apify] Got 0 items from dataset');
     } else {
       console.log('[Apify] First item keys:', Object.keys(items[0]).join(', '));
     }
@@ -143,7 +124,7 @@ async function fetchFromApify() {
     return sounds;
 
   } catch (err) {
-    console.error('[Apify] Fetch failed:', err.message);
+    console.error('[Apify] Fetch failed:', err.message, err.stack);
     return null;
 
   } finally {
