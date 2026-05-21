@@ -80,6 +80,60 @@ function requireAuth(req, res, next) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+// TEMPORARY debug endpoint — mints a test JWT signed with the real JWT_SECRET
+// so we can verify the frontend end-to-end before Allie wires up the real
+// auth handoff. Gated by a query-param key so it isn't a public token vending
+// machine. Remove once the Social Command Centre integration is live.
+app.get('/debug/login', (req, res) => {
+  if (req.query.key !== 'soundtrend-debug-2026') {
+    return res.status(404).type('text').send('Not found');
+  }
+
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return res.status(500).json({ error: 'JWT_SECRET env var is not set on Railway' });
+  }
+
+  const token = jwt.sign(
+    {
+      email:   'debug@holidayextras.com',
+      name:    'Debug User',
+      picture: '',
+      role:    'admin',
+      isAdmin: true,
+    },
+    secret,
+    { expiresIn: '7d' }
+  );
+
+  // Helpful HTML page that does the work for you
+  res.type('html').send(`<!doctype html>
+<html><head><meta charset="utf-8"><title>SoundTrend — Debug Login</title>
+<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 20px;background:#0e0e1a;color:#fff}
+a{color:#FDDC06}code{background:#222;padding:2px 6px;border-radius:4px;font-size:13px;word-break:break-all}
+.token{background:#16162a;padding:14px;border-radius:8px;margin:14px 0;word-break:break-all;font-size:12px;font-family:monospace}
+h1{color:#FDDC06}.row{margin:24px 0}</style></head>
+<body>
+<h1>🔓 SoundTrend Debug Login</h1>
+<p>A test JWT signed with the real JWT_SECRET, valid for 7 days, with admin role.</p>
+
+<div class="row">
+  <strong>1. Token:</strong>
+  <div class="token">${token}</div>
+</div>
+
+<div class="row">
+  <strong>2. To use it, append <code>?token=&lt;above&gt;</code> to your frontend URL.</strong><br>
+  Example: <code>https://your-vercel-app.vercel.app/?token=${token.slice(0,20)}...</code>
+</div>
+
+<div class="row">
+  <strong>Or paste this in the DevTools console at your frontend URL:</strong>
+  <div class="token">localStorage.setItem('sounds_auth_token', '${token}'); location.reload();</div>
+</div>
+</body></html>`);
+});
+
 // TEMPORARY debug endpoint — triggers a live RapidAPI fetch and returns the
 // result. No auth. Remove once response schema is confirmed.
 app.get('/debug/fetch', async (req, res) => {
