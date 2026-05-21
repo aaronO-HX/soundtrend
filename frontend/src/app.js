@@ -40,21 +40,51 @@ function GateScreen() {
 }
 
 // ── Global Audio Engine ───────────────────────────────────────────────────────
-// Singleton: only one sound plays at a time across the whole app
+// Singleton: only one sound plays at a time across the whole app.
+// Plays sound.audioUrl directly (from RapidAPI). If the URL is missing or
+// playback fails (CORS, expired URL, etc.), the sound is flagged as
+// `unavailableId` so the UI can render "Preview unavailable".
 
 const audioEngine = {
   audio: null,
   playingId: null,
+  unavailableId: null,            // sound id whose playback just failed
   listeners: new Set(),
 
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
-  _notify()     { this.listeners.forEach(fn => fn({ playingId: this.playingId, progress: this._progress(), duration: this._duration() })); },
+  _notify()     {
+    this.listeners.forEach(fn => fn({
+      playingId:     this.playingId,
+      unavailableId: this.unavailableId,
+      progress:      this._progress(),
+      duration:      this._duration(),
+    }));
+  },
 
   _progress() { return this.audio && this.audio.duration ? this.audio.currentTime / this.audio.duration : 0; },
   _duration() { return this.audio ? this.audio.duration || 0 : 0; },
 
+  _markUnavailable(soundId) {
+    this.playingId     = null;
+    this.unavailableId = soundId;
+    this._notify();
+    // Clear after a few seconds so the user can retry later
+    setTimeout(() => {
+      if (this.unavailableId === soundId) {
+        this.unavailableId = null;
+        this._notify();
+      }
+    }, 4000);
+  },
+
   async play(sound) {
-    const url = sound.previewUrl;
+    const url = sound.audioUrl;
+
+    // No URL → preview not possible
+    if (!url) {
+      this._markUnavailable(sound.id);
+      return;
+    }
 
     // Toggle off if same sound
     if (this.playingId === sound.id && this.audio && !this.audio.paused) {
@@ -71,6 +101,8 @@ const audioEngine = {
       this.audio.onended = null;
     }
 
+    // Clear any prior unavailable flag now that we're trying again
+    this.unavailableId = null;
     this.playingId = sound.id + '_loading';
     this._notify();
 
@@ -78,24 +110,16 @@ const audioEngine = {
     audio.volume = 0.75;
     this.audio = audio;
 
-    // Seek to a mid-point snippet so it sounds like a "preview"
-    const startAt = 30 + (sound.clipIndex * 12); // 30s, 42s, 54s, etc.
-
     audio.ontimeupdate = () => this._notify();
     audio.onended = () => { this.playingId = null; this._notify(); };
-    audio.onerror = () => { this.playingId = null; this._notify(); };
+    audio.onerror = () => { this._markUnavailable(sound.id); };
 
     try {
       await audio.play();
-      // Seek after play starts (some browsers need it in flight)
-      if (audio.duration && audio.duration > startAt) {
-        audio.currentTime = startAt;
-      }
       this.playingId = sound.id;
       this._notify();
     } catch(e) {
-      this.playingId = null;
-      this._notify();
+      this._markUnavailable(sound.id);
     }
   },
 
@@ -107,7 +131,7 @@ const audioEngine = {
 };
 
 function useAudioEngine() {
-  const [state, setState] = useState({ playingId: null, progress: 0, duration: 0 });
+  const [state, setState] = useState({ playingId: null, unavailableId: null, progress: 0, duration: 0 });
   useEffect(() => audioEngine.subscribe(s => setState({ ...s })), []);
   return state;
 }
@@ -272,9 +296,11 @@ function SkeletonCard() {
 
 function SoundCard({ sound, index, onClick }) {
   const delay = Math.min(index * 0.04, 0.4);
-  const { playingId } = useAudioEngine();
-  const isPlaying  = playingId === sound.id;
-  const isLoading  = playingId === sound.id + '_loading';
+  const { playingId, unavailableId } = useAudioEngine();
+  const isPlaying     = playingId === sound.id;
+  const isLoading     = playingId === sound.id + '_loading';
+  const isUnavailable = unavailableId === sound.id;
+  const hasPreview    = Boolean(sound.audioUrl);
 
   function handlePlay(e) {
     e.stopPropagation();
@@ -316,13 +342,23 @@ function SoundCard({ sound, index, onClick }) {
 
       <div className="card-bottom">
         <button
-          className={`play-btn ${isPlaying ? 'playing' : ''} ${isLoading ? 'loading' : ''}`}
-          onClick={handlePlay}
-          title={isPlaying ? 'Pause preview' : 'Play preview'}
+          className={`play-btn ${isPlaying ? 'playing' : ''} ${isLoading ? 'loading' : ''} ${(!hasPreview || isUnavailable) ? 'unavailable' : ''}`}
+          onClick={hasPreview ? handlePlay : (e) => e.stopPropagation()}
+          disabled={!hasPreview}
+          title={
+            !hasPreview   ? 'Preview unavailable'
+            : isUnavailable ? 'Preview unavailable'
+            : isPlaying     ? 'Pause preview'
+            :                 'Play preview'
+          }
         >
           {isLoading ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
+            </svg>
+          ) : (!hasPreview || isUnavailable) ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
             </svg>
           ) : isPlaying ? (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -335,7 +371,11 @@ function SoundCard({ sound, index, onClick }) {
           )}
         </button>
         <div className="card-commercial" style={{ marginLeft: 10 }}>
-          {isPlaying ? <EqBars /> : <CommercialBadge status={sound.commercialStatus} />}
+          {isUnavailable
+            ? <span className="preview-unavailable-mini">Preview unavailable</span>
+            : isPlaying
+            ? <EqBars />
+            : <CommercialBadge status={sound.commercialStatus} />}
         </div>
         <div className="card-chevron">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -350,21 +390,44 @@ function SoundCard({ sound, index, onClick }) {
 // ── Audio Player Component ────────────────────────────────────────────────────
 
 function AudioPlayer({ sound }) {
-  const { playingId, progress, duration } = useAudioEngine();
-  const isPlaying = playingId === sound.id;
-  const isLoading = playingId === sound.id + '_loading';
-  const elapsed   = duration * progress;
+  const { playingId, unavailableId, progress, duration } = useAudioEngine();
+  const isPlaying     = playingId === sound.id;
+  const isLoading     = playingId === sound.id + '_loading';
+  const isUnavailable = unavailableId === sound.id;
+  const hasPreview    = Boolean(sound.audioUrl);
+  const elapsed       = duration * progress;
+
+  // If we can't preview at all, render a clear unavailable state.
+  if (!hasPreview) {
+    return (
+      <div className="audio-player audio-player-unavailable">
+        <div className="audio-play-large unavailable" aria-disabled="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
+          </svg>
+        </div>
+        <div className="audio-info">
+          <div className="audio-label">Preview unavailable</div>
+          <div className="audio-sublabel">No preview audio is available for this sound.</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="audio-player">
       <button
-        className={`audio-play-large ${isPlaying ? 'playing' : ''} ${isLoading ? 'loading' : ''}`}
+        className={`audio-play-large ${isPlaying ? 'playing' : ''} ${isLoading ? 'loading' : ''} ${isUnavailable ? 'unavailable' : ''}`}
         onClick={() => audioEngine.play(sound)}
-        title={isPlaying ? 'Pause' : 'Play preview'}
+        title={isUnavailable ? 'Preview unavailable' : isPlaying ? 'Pause' : 'Play preview'}
       >
         {isLoading ? (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
+          </svg>
+        ) : isUnavailable ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>
           </svg>
         ) : isPlaying ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -379,15 +442,24 @@ function AudioPlayer({ sound }) {
 
       <div className="audio-info">
         <div className="audio-label">
-          {isLoading ? 'Loading preview…' : isPlaying ? 'Now playing preview' : 'Sound preview'}
+          {isUnavailable ? 'Preview unavailable'
+            : isLoading  ? 'Loading preview…'
+            : isPlaying  ? 'Now playing preview'
+            :              'Sound preview'}
         </div>
-        <div className="audio-progress-track">
-          <div className="audio-progress-fill" style={{ width: `${progress * 100}%` }} />
-        </div>
-        <div className="audio-time">
-          <span>{formatTime(elapsed)}</span>
-          <span>{duration ? formatTime(duration) : '--:--'}</span>
-        </div>
+        {isUnavailable ? (
+          <div className="audio-sublabel">Couldn't load this audio — try again later.</div>
+        ) : (
+          <>
+            <div className="audio-progress-track">
+              <div className="audio-progress-fill" style={{ width: `${progress * 100}%` }} />
+            </div>
+            <div className="audio-time">
+              <span>{formatTime(elapsed)}</span>
+              <span>{duration ? formatTime(duration) : '--:--'}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {isPlaying && <EqBars />}
