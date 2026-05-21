@@ -4,6 +4,14 @@ const jwt     = require('jsonwebtoken');
 const MOCK    = require('./data/sounds');
 const apify   = require('./services/apify');
 
+// Catch-all: log but don't crash the server
+process.on('uncaughtException', err => {
+  console.error('[FATAL] Uncaught exception:', err);
+});
+process.on('unhandledRejection', reason => {
+  console.error('[FATAL] Unhandled rejection:', reason);
+});
+
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
@@ -66,7 +74,7 @@ app.get('/api/sounds', requireAuth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`SoundTrend API running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`SoundTrend API listening on 0.0.0.0:${PORT}`);
   console.log(`Data source: ${process.env.APIFY_TOKEN ? 'Apify (live)' : 'Mock (no APIFY_TOKEN)'}`);
 });

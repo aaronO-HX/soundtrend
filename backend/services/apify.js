@@ -145,7 +145,9 @@ async function getSounds() {
   return _cache; // null on first cold start before fetch completes
 }
 
-// Warm the cache immediately on module load
-fetchFromApify();
+// Warm the cache immediately on module load (defensive — never let this kill the process)
+fetchFromApify().catch(err => {
+  console.error('[Apify] Startup fetch crashed:', err);
+});
 
 module.exports = { getSounds };
