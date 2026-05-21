@@ -59,6 +59,25 @@ function requireAuth(req, res, next) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+// TEMPORARY debug endpoint — triggers a live RapidAPI fetch and returns the
+// result. No auth. Remove once response schema is confirmed.
+app.get('/debug/fetch', async (req, res) => {
+  console.log('[DEBUG] Manual RapidAPI fetch triggered via /debug/fetch');
+  try {
+    const result = await rapid.refresh();
+    res.json({
+      ok:          true,
+      gotResult:   Array.isArray(result),
+      count:       Array.isArray(result) ? result.length : 0,
+      status:      rapid.getCacheStatus(),
+      firstTwo:    Array.isArray(result) ? result.slice(0, 2) : null,
+    });
+  } catch (err) {
+    console.error('[DEBUG] /debug/fetch error:', err);
+    res.status(500).json({ ok: false, error: err.message, stack: err.stack });
+  }
+});
+
 app.get('/health', (req, res) => {
   const status = rapid.getCacheStatus();
   res.json({

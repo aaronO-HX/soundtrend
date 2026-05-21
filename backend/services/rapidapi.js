@@ -214,4 +214,12 @@ function getCacheStatus() {
   };
 }
 
-module.exports = { getSounds, getCacheStatus };
+// Synchronous refresh — awaits the fetch, returns the result. For diagnostics.
+async function refresh() {
+  // Clear cache so we force a real fetch even if we just warmed it
+  _cache = null;
+  _fetchedAt = null;
+  return await fetchFromRapidAPI();
+}
+
+module.exports = { getSounds, getCacheStatus, refresh };
