@@ -15,8 +15,29 @@ process.on('unhandledRejection', reason => {
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// FRONTEND_URL env var accepts a single origin or a comma-separated list.
+// If unset, defaults to '*' (open) — fine for development, lock down for prod.
+// Vercel preview deploys (*.vercel.app) are auto-allowed when FRONTEND_URL is set,
+// so PR previews still work without manually adding each one.
+const allowList = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin(origin, cb) {
+    // No FRONTEND_URL set → open CORS (dev mode)
+    if (allowList.length === 0) return cb(null, true);
+    // Same-origin / curl / server-to-server requests have no Origin header
+    if (!origin) return cb(null, true);
+    // Explicit allow-list match
+    if (allowList.includes(origin)) return cb(null, true);
+    // Allow any Vercel preview URL (auto-deploys per branch)
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return cb(null, true);
+    console.warn(`[CORS] Rejected origin: ${origin}`);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
 }));
 
 // Log every incoming request — so we can prove if requests are reaching the server

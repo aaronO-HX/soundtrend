@@ -50,18 +50,28 @@ function toNum(v) {
 //
 // Items array path: data.stats
 // Per-item music object path: item.music
-// "musicOriginal: true" = one-off user audio (not commercial music) → filtered out.
+// "musicOriginal: true" = user-generated audio (not licensed catalog music).
+// We include these only when they cross a virality threshold (see fetcher).
 
 function mapItemToSound(item, index) {
   const m = item?.music || {};
 
-  const musicId  = m.musicId || m.id;
-  const title    = m.title || 'Unknown';
-  const artist   = m.creator || m.authorNickname || 'Unknown';
-  const cover    = m.cover || null;
-  const audio    = m.url || null;
-  const duration = toNum(m.duration);
-  const reposts  = toNum(m.reposts);
+  const musicId    = m.musicId || m.id;
+  const isOriginal = Boolean(m.musicOriginal);
+  const title      = m.title || 'Unknown';
+  const artist     = m.creator || m.authorNickname || 'Unknown';
+  const cover      = m.cover || null;
+  const audio      = m.url || null;
+  const duration   = toNum(m.duration);
+  const reposts    = toNum(m.reposts);
+
+  // Commercial status:
+  //  - Original sounds: definitely NOT licensed catalog — flag as not-commercial.
+  //  - Catalog tracks: unknown rights — flag as check.
+  const commercialStatus = isOriginal ? 'not-commercial' : 'check';
+  const commercialNote   = isOriginal
+    ? 'User-generated original audio — not commercially licensed. Do not use in branded content.'
+    : 'Commercial use status unknown — verify rights with your label rep before using in branded content.';
 
   // Growth signals from API
   const dailyRise    = toNum(m.dailyRise);          // current daily rise (count)
@@ -102,8 +112,9 @@ function mapItemToSound(item, index) {
     useCount:         reposts,
     growthCount24h:   dailyRise24h || null,
     growthPercent48h: Math.max(-90, Math.min(growthPct, 500)),
-    commercialStatus: 'check',
-    commercialNote:   'Commercial use status unknown — verify rights with your label rep before using in branded content.',
+    commercialStatus,
+    commercialNote,
+    isOriginal,
     isNew,
     isPromoted:       false,
     addedAt:          m.parseDate || new Date().toISOString(),
@@ -194,17 +205,26 @@ async function fetchFromRapidAPI() {
 
     console.log(`[RapidAPI] Got ${items.length} raw items`);
 
-    // Filter out original sounds (one-off user audio, not commercial music)
-    // and items missing core fields. Sort by reposts desc and take top 50.
+    // Original sounds with low engagement are noise (one creator's audio).
+    // Original sounds with high engagement ARE viral trends — keep those.
+    // Non-originals (commercial catalog tracks) we always keep.
+    const ORIGINAL_REPOST_THRESHOLD = 1000;
+
     const filtered = items
       .filter(it => {
         const m = it?.music;
-        return m && !m.musicOriginal && m.title && m.title.trim().length > 0;
+        if (!m || !m.title || m.title.trim().length === 0) return false;
+        if (m.musicOriginal) {
+          return toNum(m.reposts) >= ORIGINAL_REPOST_THRESHOLD;
+        }
+        return true; // commercial catalog track — always include
       })
       .sort((a, b) => toNum(b.music.reposts) - toNum(a.music.reposts))
       .slice(0, 50);
 
-    console.log(`[RapidAPI] ${filtered.length} commercial sounds after filtering`);
+    const originalCount   = filtered.filter(it => it.music.musicOriginal).length;
+    const commercialCount = filtered.length - originalCount;
+    console.log(`[RapidAPI] After filtering: ${commercialCount} commercial + ${originalCount} viral originals = ${filtered.length} total`);
 
     const sounds = filtered.map(mapItemToSound);
 
