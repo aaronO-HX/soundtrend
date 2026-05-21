@@ -597,6 +597,15 @@ function App() {
     return { total: all.length, commercial, emerging };
   }, [sounds]);
 
+  // Data source badge — reflects whether the API gave us live RapidAPI data
+  // or fell back to mock. Live sounds carry _source: 'rapidapi'.
+  const dataSource = useMemo(() => {
+    if (fetchError)                                  return { label: 'Offline',    cls: 'badge-error' };
+    if (loading)                                     return { label: 'Loading…',   cls: 'badge-muted' };
+    if (sounds.some(s => s._source === 'rapidapi')) return { label: 'Live Data',  cls: 'badge-live'  };
+    return                                                  { label: 'Demo Data',  cls: 'badge-demo'  };
+  }, [sounds, loading, fetchError]);
+
   return (
     <div className="app">
 
@@ -606,7 +615,7 @@ function App() {
           <div className="logo-icon">🎵</div>
           <div className="logo-text">Sound<span>Trend</span></div>
         </div>
-        <div className="header-badge">Live Demo</div>
+        <div className={`header-badge ${dataSource.cls}`}>{dataSource.label}</div>
       </header>
 
       {/* ── Body: sidebar + feed */}

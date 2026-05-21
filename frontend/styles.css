@@ -114,13 +114,48 @@ body {
 .header-badge {
   font-size: 11px;
   font-weight: 700;
-  color: var(--hx-yellow);
-  background: rgba(253,220,6,0.12);
-  border: 1px solid rgba(253,220,6,0.25);
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.header-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.header-badge.badge-live {
+  color: var(--green);
+  background: rgba(0,176,166,0.12);
+  border: 1px solid rgba(0,176,166,0.3);
+}
+.header-badge.badge-live::before {
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+.header-badge.badge-demo {
+  color: var(--hx-yellow);
+  background: rgba(253,220,6,0.12);
+  border: 1px solid rgba(253,220,6,0.25);
+}
+.header-badge.badge-muted {
+  color: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.header-badge.badge-error {
+  color: var(--red);
+  background: rgba(255,95,104,0.12);
+  border: 1px solid rgba(255,95,104,0.3);
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
 }
 
 /* ── Sticky Controls ──────────────────────────────────────────────────────── */
