@@ -76,14 +76,15 @@ function mapItemToSound(item, index) {
 
   // Sparkline — we don't get a per-day series from this API, but we can
   // synthesize a plausible 7-day curve from `reposts` + `dailyRise24h`.
-  // Approach: end at `reposts`, step back by `dailyRise24h` per day so the
-  // line rises if the sound is gaining, flat if not.
+  // Today's value (index 6) = `reposts`; older days step backward.
+  // The line rises toward today if the sound is gaining, flat if not.
   let sparkline;
   if (reposts > 0) {
     const step = dailyRise24h || Math.max(1, Math.round(reposts * 0.02));
     sparkline = [];
     for (let i = 6; i >= 0; i--) {
-      sparkline.unshift(Math.max(reposts - step * i, 1));
+      // i = days ago (6 = oldest, 0 = today)
+      sparkline.push(Math.max(reposts - step * i, 1));
     }
   } else {
     sparkline = [1, 1, 1, 1, 1, 1, 1];
